@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Automated Smart Diet Planner – Chat Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background-color: #f7f7f7;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    h1 {
+      margin-top: 0;
+    }
+    p {
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Automated Smart Diet Planner</h1>
+    <p>
+      This simple web page shows the <strong>Smart Diet Bot</strong> using Dialogflow Messenger.
+      Use this screenshot for your <em>"User Interface"</em> section.
+    </p>
+    <p>
+      Try questions like:
+      <ul>
+        <li>"Give me a 7 day meal plan"</li>
+        <li>"Make a 7 day vegan meal plan"</li>
+      </ul>
+    </p>
+  </div>
+
+  <!-- === DIALOGFLOW MESSENGER SNIPPET GOES HERE === -->
+  <!-- 1. Delete this comment. -->
+  <!-- 2. Paste the snippet you copied from Dialogflow Integrations. -->
+
+  <script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
+<df-messenger
+  intent="WELCOME"
+  chat-title="SmartDietPlannerBot"
+  agent-id="3e4ded23-b880-4f7f-bde5-e30b7ff596d1"
+  language-code="en"
+></df-messenger>
+
+</body>
+</html>

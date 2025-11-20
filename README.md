@@ -1,12 +1,8 @@
 # smart-diet-planner
 AI nutrition assistant using Dialogflow + Python
-Smart Diet Planner
-
-AI-Based Nutrition Assistant using Dialogflow and Python
-
 1. Project Overview
 
-The Smart Diet Planner is an AI-powered nutrition assistant designed to help users make healthier food choices. The system uses Dialogflow for natural language understanding and a Python Flask webhook to generate meal plans, provide nutrition facts, and create grocery lists. This project was developed as part of Senior Project II at the University of the District of Columbia.
+The Smart Diet Planner is an AI-powered nutrition assistant designed to help users make healthier food choices. The system utilizes Dialogflow for natural language understanding and a Python Flask webhook to generate meal plans, provide nutritional information, and create grocery lists. This project was developed as part of Senior Project II at the University of the District of Columbia.
 
 2. Features
 
@@ -120,7 +116,7 @@ Optional API connection in progress
 
 Presentation completed
 
-Project ready for continued improvements
+The project is ready for continued improvements
 
 10. Future Improvements
 
@@ -136,7 +132,20 @@ Enhanced nutrition database
 
 11. Author
 
-Developed by Maxzine (Cassidy) Reid
+Developed by Maxzine Reid
 University of the District of Columbia
 Senior Project II
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -8,7 +8,6 @@ print("\n" + "=" * 60)
 print("NEW FLASK SESSION STARTED:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 print("=" * 60 + "\n")
 
-app = Flask(__name__)
 
 # Log to console AND file
 import logging, sys
@@ -21,7 +20,7 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
-print = log.info  # redirect print() → log.info()
+
 
 # Session banner
 print("\n" + "=" * 60)
@@ -30,8 +29,7 @@ print("=" * 60 + "\n")
 
 # Save console logs to both screen and file
 log_file = open("webhook_log.txt", "a", encoding="utf-8")
-sys.stdout = log_file
-sys.stderr = log_file
+
 
 
 # 🔑 Put your real Spoonacular API key between the quotes:
@@ -54,64 +52,143 @@ def webhook():
         # Get JSON from Dialogflow
         req = request.get_json(silent=True) or {}
         query_result = req.get("queryResult") or {}
-        intent = (query_result.get("intent") or {}).get("displayName", "")
+
+        # Get raw intent name and normalize it
+        intent_info = (query_result.get("intent") or {})
+        intent_raw = (intent_info.get("displayName") or "")
+        intent = intent_raw.strip().lower()
+
+        print("RAW INTENT NAME:", repr(intent_raw))
+        print("NORMALIZED INTENT NAME:", repr(intent))
+
+        # Parameters
         params = query_result.get("parameters") or {}
 
         # Cleaner console output
         query_text = (query_result.get("queryText") or "").strip()
         print("\n────────────── Dialogflow Request ──────────────")
-        print("Time:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        print(f"User said: {query_text}")
-        print(f"Intent: {intent}")
+        print("User said:", query_text)
+        print("Intent:", intent)
         print("Parameters:", json.dumps(params, indent=2))
         print("────────────────────────────────────────────────\n")
 
-        # (These lines are a bit redundant but harmless; you can remove them later if you want)
-        query_result = req.get("queryResult") or {}
-        intent = (query_result.get("intent") or {}).get("displayName", "")
-        params = query_result.get("parameters") or {}
+        # Only handle our meal-planning / nutrition intents
+        allowed_intents = {
+            "meal plan request",
+            "plan my breakfast",
+            "nutrition info",
+        }
 
-        print("Intent:", intent)
-        print("Params:", params)
-
-        # Only handle our meal-planning intent(s)
-        allowed_intents = {"Meal Plan Request", "Plan my breakfast"}
         if intent not in allowed_intents:
+            print("UNHANDLED INTENT:", repr(intent))
             return jsonify({"fulfillmentText": "I didn’t quite understand that."})
 
-        # Extract raw values (may be lists from Dialogflow)
+        # Helper: Dialogflow sometimes sends lists like ["breakfast"]
+        def first_value(v):
+            if isinstance(v, list):
+                return v[0] if v else None
+            return v
+
+        # ---------- Nutrition Info Mode ----------
+        if intent == "nutrition info":
+            food_item = first_value(params.get("food")) or ""
+            food_item = food_item.lower().strip()
+
+            if not food_item:
+                return jsonify({
+                    "fulfillmentText": "What food would you like nutrition facts for?"
+                })
+
+            nutri_query = {
+                "query": food_item,
+                "apiKey": SPOONACULAR_API_KEY,
+            }
+
+            print("Nutrition query:", nutri_query)
+
+            try:
+                # Step 1: Search for ingredient ID
+                search_resp = requests.get(
+                    "https://api.spoonacular.com/food/ingredients/search",
+                    params=nutri_query,
+                    timeout=15,
+                )
+                search_data = search_resp.json() if search_resp.content else {}
+                results = search_data.get("results") or []
+
+                if not results:
+                    return jsonify({
+                        "fulfillmentText": (
+                            f"Sorry, I couldn’t find nutrition data for {food_item}."
+                        )
+                    })
+
+                ing_id = results[0].get("id")
+
+                # Step 2: Get nutrition details for that ID
+                info_resp = requests.get(
+                    f"https://api.spoonacular.com/food/ingredients/{ing_id}/information",
+                    params={"amount": 100, "unit": "g", "apiKey": SPOONACULAR_API_KEY},
+                    timeout=15,
+                )
+                info = info_resp.json() if info_resp.content else {}
+
+                name = info.get("name", food_item).title()
+                nutrients = info.get("nutrition", {}).get("nutrients", [])
+
+                # Extract common nutrients
+                def get_nutrient(name_):
+                    return next(
+                        (n["amount"] for n in nutrients if n["name"] == name_),
+                        None,
+                    )
+
+                calories = get_nutrient("Calories")
+                protein = get_nutrient("Protein")
+                carbs = get_nutrient("Carbohydrates")
+                fat = get_nutrient("Fat")
+
+                reply = (
+                    f"🍎 Nutrition Facts for **{name}** (per 100g):\n\n"
+                    f"• Calories: {calories} kcal\n"
+                    f"• Protein: {protein} g\n"
+                    f"• Carbs: {carbs} g\n"
+                    f"• Fat: {fat} g\n\n"
+                    f"Ask me about another food anytime!"
+                )
+                return jsonify({"fulfillmentText": reply})
+
+            except Exception as e:
+                print("Nutrition error:", e)
+                return jsonify({
+                    "fulfillmentText": (
+                        f"Sorry, I couldn’t retrieve nutrition details for {food_item} right now."
+                    )
+                })
+
+        # ---------- Extract raw values for meal-planning ----------
         raw_meal = first_value(params.get("mealType"))
         raw_diet = first_value(params.get("diet"))
         raw_number = first_value(params.get("number"))
         raw_time = first_value(params.get("maxTime"))
 
-        # Normalize meal type (handle plurals like "breakfasts" → "breakfast")
-        meal_type = (raw_meal or "breakfast").lower()
-        if meal_type.endswith("es") and meal_type[:-2] in ("lunch",):
-            meal_type = meal_type[:-2]
-        elif meal_type.endswith("s"):
-            meal_type = meal_type[:-1]
+        # Fix empty-array / empty-string issue
+        if raw_number in (None, [], ""):
+            raw_number = 3           # default 3 items
+        if raw_meal in (None, [], ""):
+            raw_meal = "meal"        # default generic meal
+        if raw_time in (None, [], ""):
+            raw_time = None          # no time limit
 
-        # Normalize diet
+        # ---------- Normalize values ----------
+        meal_type = (raw_meal or "meal").lower()
         diet = (raw_diet or "").lower() or None
 
-        # If diet is empty but meal_type contains a known diet word, split it.
-        known_diets = ["keto", "vegan", "vegetarian", "paleo"]
-        if not diet:
-            for d in known_diets:
-                prefix = d + " "
-                if meal_type.startswith(prefix):
-                    diet = d
-                    meal_type = meal_type[len(prefix):]  # "keto lunch" -> "lunch"
-                    break
-
-        # Normalize number
         try:
-            number = int(raw_number) if raw_number is not None else 3
+            number = int(raw_number)
         except (TypeError, ValueError):
             number = 3
 
-        # Normalize max cooking time (minutes)
         try:
             max_time = int(raw_time) if raw_time is not None else None
         except (TypeError, ValueError):
@@ -122,11 +199,8 @@ def webhook():
         print("Normalized number:", number)
         print("Normalized max_time:", max_time)
 
-        # --- Weekly plan mode: e.g., "make a 7 day (vegan) meal plan" ---
+        # ---------- Weekly 7-day mode ----------
         query_text_l = (query_text or "").lower()
-
-        # Consider it a "generic meal" request if they didn't say breakfast/lunch/dinner/snack,
-        # or if the word "meal" appears.
         lower_meal_type = (meal_type or "").lower()
         generic_meal = (
             lower_meal_type in ("meal", "", None)
@@ -142,96 +216,68 @@ def webhook():
         )
 
         if weekly_mode:
-            plan_query = {"timeFrame": "week", "apiKey": SPOONACULAR_API_KEY}
+            weekly_query = {
+                "number": max(7, number),
+                "apiKey": SPOONACULAR_API_KEY,
+                "type": "main course",
+            }
             if diet:
-                plan_query["diet"] = diet  # vegan/vegetarian/keto/etc.
+                weekly_query["diet"] = diet
 
-            print("Weekly plan query:", plan_query)
+            print("Weekly query:", weekly_query)
 
             resp = requests.get(
-                "https://api.spoonacular.com/mealplanner/generate",
-                params=plan_query,
-                timeout=20,
+                "https://api.spoonacular.com/recipes/complexSearch",
+                params=weekly_query,
+                timeout=15,
             )
             data = resp.json() if resp.content else {}
-            print("Weekly plan status:", resp.status_code)
+            print("Weekly status:", resp.status_code)
 
-            week = data.get("week") or {}
-            if not week:
-                # Clean diet word
-                if diet and diet not in ("meal", "dinner", "lunch", "breakfast"):
-                    diet_part = f"{diet} "
-                else:
-                    diet_part = ""
+            results = data.get("results") or []
+
+            if not results:
+                diet_part = f"{diet} " if diet else ""
                 return jsonify({
-                    "fulfillmentText": f"Sorry, I couldn’t generate a {diet_part}7-day meal plan right now. Try again in a moment."
+                    "fulfillmentText": (
+                        f"Sorry, I couldn’t generate a {diet_part}7-day meal plan right now. "
+                        f"Please try again later."
+                    )
                 })
 
-            # Build a 7-day dinner plan, labeled by day and try to avoid duplicates
-            order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-            day_labels = ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"]
-
+            # Label days
+            results = results[:7]
             lines = []
-            seen_titles = set()
+            for i, item in enumerate(results, start=1):
+                title = item.get("title", "a recipe")
+                lines.append(f"Day {i}: {title}")
 
-            for idx, day_name in enumerate(order):
-                day = week.get(day_name, {}) or {}
-                meals = day.get("meals") or []
+            diet_part = f"{diet} " if diet else ""
+            reply_lines = [f"🍽️ {day}" for day in lines]
 
-                # Try to pick a "dinner" first
-                pick = next((m for m in meals if "dinner" in (m.get("title", "").lower())), None)
-
-                # Fallback: 3rd meal if present
-                if not pick and len(meals) >= 3:
-                    pick = meals[2]
-                # Fallback: last meal
-                if not pick and meals:
-                    pick = meals[-1]
-
-                if not pick:
-                    continue
-
-                title = pick.get("title", "a recipe")
-
-                # Try to avoid exact duplicates across days
-                if title in seen_titles:
-                    continue
-                seen_titles.add(title)
-
-                label = day_labels[idx]
-                lines.append(f"{label}: {title}")
-
-            # Clean diet part for the weekly reply
-            if diet and diet not in ("meal", "dinner", "lunch", "breakfast"):
-                diet_part = f"{diet} "
-            else:
-                diet_part = ""
-
-            if lines:
-                reply = (
-                    f"Here’s a 7-day {diet_part}meal plan (dinners):\n"
-                    + "\n".join(lines)
-                )
-            else:
-                reply = (
-                    f"Here’s your 7-day {diet_part}meal plan. "
-                    "(I can list full days if you’d like.)"
-                )
-
+            reply = (
+                f"🌿 Here’s your 7-day {diet_part}meal plan (dinners):\n\n"
+                + "\n".join(reply_lines)
+                + "\n\n✨ Ask me for a grocery list or nutrition facts for any of these!"
+            )
             return jsonify({"fulfillmentText": reply})
 
-        # ---------------- Normal (non-weekly) recipe search ----------------
+        # ---------- Normal (non-weekly) recipe search ----------
+        spoon_type = (meal_type or "").lower()
+        if spoon_type in ("meal", "meals", ""):
+            spoon_type = "main course"
+        elif spoon_type in ("lunch", "dinner"):
+            spoon_type = "main course"
 
-        # Build request to Spoonacular
         query = {
-            "type": meal_type,          # breakfast / lunch / dinner / snack
+            "type": spoon_type,
             "number": number,
             "apiKey": SPOONACULAR_API_KEY,
         }
         if diet:
-            query["diet"] = diet       # vegan, vegetarian, etc.
+            query["diet"] = diet
         if max_time:
-            query["maxReadyTime"] = max_time  # under X minutes
+            query["maxReadyTime"] = max_time
 
         print("Spoonacular query:", query)
 
@@ -246,8 +292,8 @@ def webhook():
         results = data.get("results") or []
 
         if not results:
-            # Clean diet word
-            lower_meal_type = (meal_type or "").lower()
+            lower_meal_type = (meal_type or spoon_type or "meal").lower()
+
             if diet and diet not in lower_meal_type:
                 diet_part = f"{diet} "
             else:
@@ -259,17 +305,22 @@ def webhook():
             else:
                 time_part = ""
 
-            return jsonify({
-                "fulfillmentText": f"I couldn’t find any {diet_part}{meal_type}{time_part} recipes right now. Try a different meal type, diet, or time."
-            })
+            msg = (
+                f"😕 Sorry, I couldn’t find any {diet_part}{lower_meal_type}{time_part} ideas right now.\n"
+                f"💡 Try asking for something like:\n"
+                f"• 3 vegan dinners\n"
+                f"• healthy breakfast ideas\n"
+                f"• 5 low-carb snacks"
+            )
+            return jsonify({"fulfillmentText": msg})
 
-        # Limit to the number requested
         results = results[:number]
-        titles = ", ".join(item.get("title", "a recipe") for item in results)
+        lines = []
+        for item in results:
+            title = item.get("title", "a recipe")
+            lines.append(f"🍽️ {title}")
 
-        # Avoid "vegan vegan meal" style duplication
-        lower_meal_type = (meal_type or "").lower()
-        if diet and diet not in lower_meal_type:
+        if diet and diet not in (meal_type or "").lower():
             diet_part = f"{diet} "
         else:
             diet_part = ""
@@ -280,8 +331,11 @@ def webhook():
         else:
             time_part = ""
 
-        reply = f"Here are some {diet_part}{meal_type}{time_part} ideas: {titles}"
-
+        reply = (
+            f"🌿 Here are some {diet_part}{meal_type}{time_part} ideas:\n\n"
+            + "\n".join(lines)
+            + "\n\n✨ Let me know if you want grocery lists or nutrition facts too!"
+        )
         return jsonify({"fulfillmentText": reply})
 
     except Exception as e:
@@ -289,6 +343,8 @@ def webhook():
         return jsonify({
             "fulfillmentText": "Sorry, something went wrong in the meal planner webhook."
         })
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
